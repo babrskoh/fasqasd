@@ -1,0 +1,45 @@
+name: Pro Proxy Checker
+
+on:
+  workflow_dispatch:
+    inputs:
+      proxy_input:
+        description: 'Paste Link or Proxy List (IP:Port)'
+        required: true
+      default_proto:
+        description: 'If protocol is missing, use:'
+        type: choice
+        options:
+          - http
+          - socks4
+          - socks5
+        default: 'http'
+
+jobs:
+  run-checker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install aiohttp aiohttp_socks
+
+      - name: Run Proxy Test
+        env:
+          PROXY_INPUT: ${{ github.event.inputs.proxy_input }}
+          DEFAULT_PROTO: ${{ github.event.inputs.default_proto }}
+        run: python checker.py
+
+      - name: Save Results
+        run: |
+          git config --local user.email "bot@github.com"
+          git config --local user.name "ProxyBot"
+          git add results/*.txt
+          git commit -m "Updated proxies: $(date)" || exit 0
+          git push
