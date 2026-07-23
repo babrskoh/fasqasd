@@ -35,8 +35,11 @@ async def check_proxy(proxy_url, sem):
         results = {"proxy": proxy_url, "tcp": False, "http": False, "latency": 99999}
         start_time = time.time()
         try:
-            host_port = proxy_url.split("://")[-1]
-            host, port = host_port.split(":")
+            # پاکسازی آدرس برای تست TCP
+            clean_url = proxy_url.split("://")[-1].split('/')[0]
+            if ":" not in clean_url: return results
+            host, port = clean_url.split(":")
+            
             # TCP Test
             try:
                 conn = asyncio.open_connection(host, int(port))
@@ -50,7 +53,8 @@ async def check_proxy(proxy_url, sem):
             # HTTP Test
             connector = ProxyConnector.from_url(proxy_url) if "socks" in proxy_url else None
             async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(TEST_URL, proxy=None if connector else proxy_url, timeout=TIMEOUT, headers={'User-Agent': 'Mozilla/5.0'}) as response:
+                proxy_arg = None if connector else proxy_url
+                async with session.get(TEST_URL, proxy=proxy_arg, timeout=TIMEOUT, headers={'User-Agent': 'Mozilla/5.0'}) as response:
                     if response.status in [200, 204]:
                         results["http"] = True
                         results["latency"] = int((time.time() - start_time) * 1000)
@@ -61,20 +65,31 @@ async def check_proxy(proxy_url, sem):
 async def main():
     raw_input = os.getenv("PROXY_INPUT", "")
     default_proto = os.getenv("DEFAULT_PROTO", "http")
+    
+    if not raw_input:
+        print("Error: PROXY_INPUT is empty")
+        return
+
     if raw_input.startswith("http"):
         content = await fetch_url_content(raw_input)
         if content: raw_input = content
+        
     proxies_to_test = clean_proxy_list(raw_input, default_proto)
+    print(f"Testing {len(proxies_to_test)} proxies...")
+
     sem = asyncio.Semaphore(CONCURRENCY_LIMIT)
     tasks = [check_proxy(p, sem) for p in proxies_to_test]
     results = await asyncio.gather(*tasks)
+    
     all_pass = sorted([r for r in results if r['tcp'] and r['http']], key=lambda x: x['latency'])
     tcp_only = [r for r in results if r['tcp']]
     http_only = [r for r in results if r['http']]
+    
     os.makedirs("results", exist_ok=True)
     with open("results/all.txt", "w") as f: f.write("\n".join([r['proxy'] for r in all_pass]))
     with open("results/tcp_pass.txt", "w") as f: f.write("\n".join([r['proxy'] for r in tcp_only]))
     with open("results/http_pass.txt", "w") as f: f.write("\n".join([r['proxy'] for r in http_only]))
+    print(f"Success! {len(all_pass)} proxies saved.")
 
-if name == "main":
+if __name__ == "__main__":
     asyncio.run(main())
